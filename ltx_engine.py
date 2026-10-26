@@ -2189,7 +2189,10 @@ def generation_worker(config, root, progress_var, progress_bar, btn_generate, bt
             elif full_resident:
                 print(f"  -> {vram_total_gb:.0f}GB VRAM and this run fits; "
                       "keeping transformer GPU-resident, no offload streaming.")
-                pipe.transformer.to(onload_device)
+                if not getattr(pipe.transformer, "hf_device_map", None):
+                    pipe.transformer.to(onload_device)
+                # A device-mapped transformer is already on cuda:0; do not
+                # attempt to move Accelerate-dispatched weights again.
             else:
                 if vram_total_gb and vram_total_gb >= FULL_RESIDENT_VRAM_THRESHOLD_GB:
                     print(f"  -> {vram_total_gb:.0f}GB VRAM, but this run's estimated peak "
