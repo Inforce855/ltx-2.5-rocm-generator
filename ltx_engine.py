@@ -1452,11 +1452,17 @@ def encode_in_subprocess(model_path, p, np_text, need_negative, out_path):
     import warnings
     warnings.filterwarnings("ignore", category=FutureWarning)
     from diffusers import LTX2Pipeline
-    print("  -> Booting Text Encoder in isolated process...")
+    # Large unified-memory GPUs (e.g. gfx1151 with 96GiB allocated to GPU)
+    # can run Gemma directly on the GPU, avoiding ~24GB of CPU-resident weights.
+    # Keep the upstream CPU path for smaller cards.
+    gpu_text_encoder = (torch.cuda.is_available()
+                        and torch.cuda.get_device_properties(0).total_memory >= 64 * (1024 ** 3))
+    print(f"  -> Booting Text Encoder in isolated process ({'GPU' if gpu_text_encoder else 'CPU'})...")
     pipe_text = LTX2Pipeline.from_pretrained(
         model_path,
         transformer=None, vae=None, audio_vae=None, vocoder=None,
         torch_dtype=torch.bfloat16, local_files_only=True,
+        **({"device_map": "balanced", "low_cpu_mem_usage": True} if gpu_text_encoder else {}),
     )
     with torch.no_grad():
         # When CFG is disabled (distilled schedule) the negative branch is never
@@ -1465,8 +1471,11 @@ def encode_in_subprocess(model_path, p, np_text, need_negative, out_path):
             prompt=p,
             negative_prompt=np_text if need_negative else None,
             do_classifier_free_guidance=need_negative,
-            device="cpu",
+            device="cuda" if gpu_text_encoder else "cpu",
         )
+    # Always cache portable CPU embeddings. Otherwise torch.load in the parent
+    # would deserialize GPU tensors and allocate VRAM before the model stage.
+    embeds = tuple(t.detach().cpu() if t is not None else None for t in embeds)
     # Write to a temp file and rename into place. A straight save to out_path
     # left a truncated .pt behind if the process was killed mid-write --
     # cancel does exactly that (run_subprocess_logged terminates on
@@ -2009,7 +2018,7 @@ def generation_worker(config, root, progress_var, progress_bar, btn_generate, bt
                 and _MODEL_CACHE["path"] == model_path
                 and _MODEL_CACHE.get("opts") == build_opts):
             pipe = _MODEL_CACHE["pipe"]
-            print("--- [2/4] Reusing resident FP8 pipeline (no disk reload) ---")
+            print("--- [2/4] Reusing resident pipeline (no disk reload) ---")
         else:
             if _MODEL_CACHE["pipe"] is not None and _MODEL_CACHE.get("opts") != build_opts:
                 # Say so explicitly -- otherwise an unexpectedly slow run after a
@@ -2019,7 +2028,7 @@ def generation_worker(config, root, progress_var, progress_bar, btn_generate, bt
                 _MODEL_CACHE.update({"pipe": None, "path": None, "opts": None})
                 gc.collect()
                 torch.cuda.empty_cache()
-            print("--- [2/4] Loading FP8 Transformer & Enabling VRAM Protections ---")
+            print("--- [2/4] Loading Transformer & Enabling VRAM Protections ---")
             _load_kwargs = {}
             if use_multi_gpu:
                 # accelerate refuses to shard a class that hasn't declared what
@@ -2031,6 +2040,13 @@ def generation_worker(config, root, progress_var, progress_bar, btn_generate, bt
                 _load_kwargs["device_map"] = "balanced"
                 print(f"  -> Sharding transformer across {torch.cuda.device_count()} GPUs "
                       "(device_map=balanced).")
+            elif full_resident and vram_total_gb >= 64.0:
+                # A large GPU can receive shards directly during loading,
+                # avoiding a complete BF16 model copy in limited system RAM.
+                # Verified on gfx1151 / 96GiB with Diffusers' device_map='cuda:0'.
+                _load_kwargs["device_map"] = "cuda:0"
+                _load_kwargs["low_cpu_mem_usage"] = True
+                print("  -> Large-VRAM GPU: loading transformer weights directly onto cuda:0.")
             # Follow the checkpoint rather than forcing fp8: passing
             # float8_e4m3fn against an unquantised checkpoint downcasts it on
             # load, which would quietly convert a bf16 run back into an fp8 one.
