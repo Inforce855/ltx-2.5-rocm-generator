@@ -161,7 +161,9 @@ def summarise(config):
     else:
         print(f"  length     : {f} frames @ {config['fps']}fps ({f / float(config['fps']):.2f}s)")
     _mp = gv.resolve_model_path(config)
-    _prec = "bf16" if _mp == gv.BF16_MODEL_PATH else "fp8"
+    # LTX_MODEL_PATH can point directly to a BF16 checkpoint outside the
+    # generator's optional local_ltx25_bf16 folder.
+    _prec = "fp8" if "float8" in str(gv.transformer_checkpoint_dtype(_mp)) else "bf16"
     _asked = config.get("model_precision", "fp8")
     print(f"  transformer: {_prec}"
           f"{'  (bf16 asked for but not on disk)' if _asked == 'bf16' and _prec != 'bf16' else ''}")
