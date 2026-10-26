@@ -136,6 +136,12 @@ Nothing here ships weights — you build the environment and the FP8 model once,
 
 4. *(Optional)* the prompt enhancer — see [Requirements](#requirements).
 
+### Generated outputs
+
+Run the CLI and GUI **from the repository root**. Completed MP4s are saved to `outputs/` automatically (the directory is created when needed). Existing files are preserved with the generator's usual numeric suffix handling.
+
+Leave `prompt_history.json`, `vram_calibration.json`, `ltx2_config.json`, and the model/cache folders in the repository root; these are local working state rather than video outputs. Logs can stay in `runs/`.
+
 ### Large-VRAM ROCm GPUs (e.g. Radeon 8060S / gfx1151)
 
 The default 16GB-card workflow uses an FP8 transformer and CPU text encoding.
