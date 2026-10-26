@@ -136,6 +136,28 @@ Nothing here ships weights — you build the environment and the FP8 model once,
 
 4. *(Optional)* the prompt enhancer — see [Requirements](#requirements).
 
+### Large-VRAM ROCm GPUs (e.g. Radeon 8060S / gfx1151)
+
+The default 16GB-card workflow uses an FP8 transformer and CPU text encoding.
+On **single GPUs with at least 64 GiB of allocated VRAM**, this fork also:
+
+- Loads the text encoder directly onto the GPU inside the short-lived text-encoding subprocess; cached embeddings are moved back to CPU before saving.
+- Loads the transformer directly onto the GPU with Diffusers' `device_map="cuda:0"` when the normal resident-fit calculation says it will fit.
+- Leaves the original CPU/offload behaviour for smaller GPU allocations intact.
+
+These paths have been separately load-tested with **PyTorch 2.11.0+rocm7.13.0 on Radeon 8060S (gfx1151), 30 GiB system RAM / 96 GiB GPU allocation**. End-to-end video generation is not yet verified on this hardware.
+
+You can use the original **BF16** transformer without running `quant_transformer_fp8.py`, provided `local_ltx25_model/` contains the complete Diffusers checkpoint and its patched `model_index.json`:
+
+```bash
+LTX_MODEL_PATH="$PWD/local_ltx25_model" .venv/bin/python cli_gen_vid.py \
+  --prompt "A small plush tiger resting on a sofa." \
+  --width 512 --height 288 --frames 49 --fps 16 \
+  --no-upscale --dry-run
+```
+
+Use the same command without `--dry-run` only after confirming the resolved settings. A large GPU allocation does **not** mean that model loading and rendering can never exhaust system RAM; monitor RAM/swap during the first full run.
+
 ### Running
 
 ```bash
