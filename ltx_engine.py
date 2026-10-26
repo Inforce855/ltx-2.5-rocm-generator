@@ -91,6 +91,8 @@ os.environ.setdefault("OMP_NUM_THREADS", "16")
 os.environ.setdefault("MKL_NUM_THREADS", "16")
 
 CONFIG_FILE = "ltx2_config.json"
+# Keep generated videos separate from model files, caches, and local state.
+OUTPUT_DIR = os.path.abspath("./outputs")
 # Local working state, same reasoning as ltx2_config.json: not shareable,
 # not tracked.
 PROMPT_HISTORY_FILE = "prompt_history.json"
@@ -2777,8 +2779,12 @@ def generation_worker(config, root, progress_var, progress_bar, btn_generate, bt
         # investigation), so it needs to be in the name too, not just guidance.
         if use_video:
             guide_tag += f"_str{video_strength:g}"
-        output_file = (f"output_{mode_tag}{out_w}x{out_h}_{final_frames}f"
-                       f"_seed{config['active_seed']}{guide_tag}.mp4")
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        output_file = os.path.join(
+            OUTPUT_DIR,
+            f"output_{mode_tag}{out_w}x{out_h}_{final_frames}f"
+            f"_seed{config['active_seed']}{guide_tag}.mp4",
+        )
         # The name above is fully determined by mode/resolution/frames/seed/
         # guidance -- any exact rerun (a second click, an unattended repeat)
         # reproduces it byte-for-byte and would otherwise silently overwrite
